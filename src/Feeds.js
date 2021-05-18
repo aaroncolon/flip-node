@@ -1,3 +1,4 @@
+import NodeCache from 'node-cache';
 import Utilities from './Utilities';
 import { feedUrls } from './feedUrls';
 
@@ -14,6 +15,12 @@ class Feeds {
     this.rssFeedsData; // local reference to parsed XML String and pubDate
     this.feedLatest;
     this.intervalIdRefresh;
+
+    this.myCache = new NodeCache({
+      'stdTTL' : 290,
+      'checkperiod' : 0
+    });
+    console.log('this.myCache', this.myCache);
   }
 
   async init() {
@@ -124,7 +131,7 @@ class Feeds {
    * @param {String} key
    * @param {String} value
    */
-  populateStorage(key, value) {
+  populateLocalStorage(key, value) {
     localStorage.setItem(key, value);
   }
 
@@ -148,6 +155,12 @@ class Feeds {
    * @return {Array} parsed and sorted feed data
    */
   fetchAllFeeds() {
+    // check cache
+    const data = this.myCache.get('rssFeedsData');
+    if (data !== undefined) {
+      return data;
+    }
+
     const promises = feedUrls.map(url => this.fetchProxy(url));
 
     return Promise.all(promises).then((values) => {
@@ -183,7 +196,7 @@ class Feeds {
     this.sortFeedsLatest(parsedData);
 
     // check if cache is stale
-    if (!noCache && this.isCacheStale(parsedData)) {
+    if (this.isCacheStale(parsedData)) {
       const cacheData = parsedData.map((item) => {
         // serialize firstFeedItem for localStorage
         const firstFeedItemString = this.xmlSerializer.serializeToString(item.feedData);
@@ -197,7 +210,8 @@ class Feeds {
       });
 
       // cache the data
-      this.populateStorage('rssFeedsData', JSON.stringify(cacheData));
+      // this.populateStorage('rssFeedsData', JSON.stringify(cacheData));
+      this.myCache.set('rssFeedsData', JSON.stringify(cacheData));
     }
 
     return parsedData;
@@ -210,6 +224,25 @@ class Feeds {
    * @return {Boolean}
    */
   isCacheStale(data) {
+    if (this.myCache.get('rssFeedsData') == undefined) {
+      return true;
+    }
+
+    const cachedData = this.myCache.get('rssFeedsData');
+    const newContentAvailable = data.findIndex((el, index) => {
+      return el.pubDate > cachedData[index].pubDate;
+    }, this);
+
+    return (newContentAvailable !== -1) ? true : false;
+  }
+
+  /**
+   * Check if LocalStorage Cache is Stale
+   *
+   * @param {Array} data data to compare to cache
+   * @return {Boolean}
+   */
+  isLocalStorageCacheStale(data) {
     if (!localStorage.getItem('rssFeedsData')) {
       return true;
     }
